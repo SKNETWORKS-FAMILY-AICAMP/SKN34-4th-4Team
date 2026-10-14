@@ -149,7 +149,7 @@
 | --- | --- |
 | **Frontend** | React 19 · TypeScript 5.9 · Vinext(Vite 8) · Tailwind CSS 4 · TanStack Query |
 | **Backend · API** | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Uvicorn |
-| **Django** | Django 5.2 — 공고문 질문 중계 · 요청 기록(Django ORM · Admin), 선택 배포 |
+| **Django** | Django 5.2 · Gunicorn — 공고문 질문 중계와 요청 기록(Django ORM · Admin, 별도 SQLite). AWS에 함께 배포 |
 | **AI · RAG** | OpenAI API(구조화 추출 · 답변 생성) · LangChain Core · FAISS · 자체 엔진 `bidengine`(추출 · 근거 확인 · 판정 · 차수 비교) |
 | **Database** | PostgreSQL(AWS RDS) · 마이그레이션 30개 |
 | **문서 처리** | pypdf · olefile · rhwp — PDF · HWP · HWPX |
@@ -168,7 +168,7 @@
 | 1. 구조 재설계 | 09-30 ~ 10-02 | 3차 코드를 웹 · API · 엔진 · 측정으로 재분배, 엔진을 DB·API에서 분리 | ADR 0001 · 엔진 경계 테스트 |
 | 2. 정확도 측정 기반 | 10-01 ~ 10-06 | 실제 공고 표본 수집, 정답 표본 104건, 회귀 도구 | 공고 표본 7개 · 변경 공고 표본 2개 · 회귀 기준선 |
 | 3. 추출 · 판정 개선 | 10-06 ~ 10-10 | 약한 근거는 미충족으로 확정하지 않는 가드, 나라장터 면허제한 연동, 추출 맥락 가드 | 판정 정책 · 골든 회귀 105/138 |
-| 4. 서비스 기능 | 10-07 ~ 10-14 | AI Copilot 자유 대화 · 전용 화면, 변경공고 요약, 요금제 · 한도, 사업자번호 조회, 만료 공고 관리, 입찰 준비 지침서, 회원가입, Django 문서 질의 중계 | 화면 · API · 마이그레이션 030 |
+| 4. 서비스 기능 | 10-07 ~ 10-14 | AI Copilot 자유 대화 · 전용 화면, 변경공고 요약, 요금제 · 한도, 사업자번호 조회, 만료 공고 관리, 입찰 준비 지침서, 회원가입, Django 문서 질의 중계(AWS 배포) | 화면 · API · 마이그레이션 030 |
 | 5. 클라우드 배포 | 10-08 ~ 10-13 | AWS 인프라 구성, 자동 배포, 스키마 검사 게이트 | 배포 워크플로 · 배포 문서 |
 | 6. 검증 · 제출 | 10-10 ~ | 통합 테스트, 브라우저 E2E, 산출물 정리 | 테스트 결과 · README |
 
@@ -280,8 +280,8 @@ flowchart LR
     subgraph EC2["AWS EC2 · Docker Compose"]
         C --> W[Web · Vinext/React]
         C --> A[API · FastAPI]
-        C -.선택 배포.-> D[Django<br/>문서 질의 중계 · 요청 기록]
-        D -.-> A
+        C -->|/api/v1/django-qa| D[Django<br/>문서 질의 중계 · 요청 기록]
+        D --> A
         P[notice-poller<br/>공고 수집기]
         K[processing-worker<br/>첨부 추출 · 분석 큐]
     end
@@ -299,7 +299,7 @@ flowchart LR
 ```
 
 - 구조화 데이터는 RDS, 첨부 원본은 비공개 S3에 둡니다. EC2에는 DB 컨테이너가 없습니다.
-- Django는 선택 배포입니다. 공고문 질문 요청을 받아 로그인을 확인하고 FastAPI로 넘기며, 요청 기록(질문 원문 없이 길이 · 해시 · 소요 시간)을 자체 DB에 남깁니다. 기본 배포에는 들어 있지 않습니다.
+- Django는 AWS에 함께 배포됩니다. 배포 워크플로가 Django 이미지를 따로 만들고, EC2에 켜기 표시가 있으면 Caddy가 `/api/v1/django-qa/*`를 Django로 보냅니다. 웹은 동의를 받은 공고문 질문만 이 경로로 보내고, Django는 로그인을 확인해 FastAPI로 넘기며 요청 기록(질문 원문 없이 길이 · 해시 · 소요 시간)을 자체 DB에 남깁니다. 판정 · 회사 정보 · 일반 대화는 그대로 FastAPI가 처리합니다.
 - 비밀 값은 AWS SSM Parameter Store에 두고 배포할 때 EC2에서 읽습니다. GitHub와 이미지에는 장기 키가 없습니다(OIDC 역할 사용).
 - 배포 순서: 이미지 받기 → **스키마 · TLS 검사** → 서비스 교체 → HTTPS 상태 확인. 실패하면 이전 이미지로 되돌립니다.
 
