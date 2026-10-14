@@ -1,0 +1,419 @@
+"""Backend service boundary for qualification Requirement analysis persistence."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from decimal import Decimal
+from typing import Iterable
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from bidengine.pipeline.analysis_pipeline import (
+    QualificationAnalysisInput,
+    QualificationDocumentInput,
+    StructuredExtractor,
+    analyze_qualification_documents,
+)
+from bidengine.judgment.rules import requirement_tier
+from bidengine.pipeline.analysis_result import AnalysisCoverage, RequirementAnalysisResult
+from bidengine.contracts import Evidence, EvidenceLocation, QualificationRequirement
+from ..analysis_models import (
+    QualificationAnalysisRun,
+    QualificationEvidenceRecord,
+    QualificationRequirementRecord,
+)
+from ..analysis_schemas import QualificationAnalysisRunRead, QualificationAnalysisRunSummary
+from ..models import BidNoticeVersion, NoticeDocument
+from ..services.participation_limits import LimitsFetcher, engine_notice_limits, ensure_participation_limits
+from .answer_memory import DbAnswerMemory, DbIndustryNameResolver
+
+
+class QualificationAnalysisError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+def _load_notice_version(
+    db: Session,
+    *,
+    notice_id: UUID,
+    version_number: int,
+) -> BidNoticeVersion:
+    version = db.scalar(
+        select(BidNoticeVersion)
+        .where(
+            BidNoticeVersion.notice_id == notice_id,
+            BidNoticeVersion.version_number == version_number,
+        )
+        .options(selectinload(BidNoticeVersion.documents))
+    )
+    if version is None:
+        raise QualificationAnalysisError(
+            "NOTICE_VERSION_NOT_FOUND", "분석할 공고 버전을 찾을 수 없습니다."
+        )
+    return version
+
+
+def build_qualification_analysis_input(version: BidNoticeVersion) -> QualificationAnalysisInput:
+    documents = [
+        QualificationDocumentInput(
+            document_id=str(document.id),
+            file_sha256=document.file_sha256,
+            extracted_text_sha256=document.extracted_text_sha256,
+            extracted_blocks=list(document.extracted_blocks or []),
+        )
+        for document in version.documents
+        if document.extraction_status == "EXTRACTED" and document.extracted_blocks
+    ]
+    return QualificationAnalysisInput(
+        notice_id=str(version.notice_id),
+        notice_version_id=str(version.id),
+        documents=documents,
+    )
+
+
+def no_restriction_stated(analysis) -> bool:
+    """나라장터가 이 공고를 참가 제한이 없는 입찰(일반경쟁, 면허제한·참가가능지역·제한 표시 없음)이라 했는가.
+
+    분석할 때 coverage 에 저장해 둔 값이다. 판정기는 문서에서 요건을 하나도 못 찾았고 놓친 조항도 없을 때만 이 값을 보고
+    '핵심 요건이 없는 공고' 로 확정한다. 2026-10-10 이전 분석이나 참가 제한을 받지 못한 분석은 False 다.
+    """
+    coverage = getattr(analysis, "coverage", None)
+    return bool(coverage is not None and getattr(coverage, "no_restriction_stated", False))
+
+
+def qualification_analysis_input_fingerprint(
+    analysis_input: QualificationAnalysisInput,
+) -> str:
+    """Fingerprint the exact extracted document revisions supplied to analysis."""
+    return qualification_analysis_document_fingerprint(
+        (document.document_id, document.extracted_text_sha256)
+        for document in analysis_input.documents
+    )
+
+
+def qualification_analysis_document_fingerprint(
+    documents: Iterable[tuple[str, str | None]],
+) -> str:
+    """Hash document identity and text revision without loading extracted blocks."""
+    lineage = sorted(
+        (
+            {
+                "document_id": document_id,
+                "extracted_text_sha256": extracted_text_sha256,
+            }
+            for document_id, extracted_text_sha256 in documents
+        ),
+        key=lambda item: item["document_id"],
+    )
+    payload = json.dumps(lineage, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"qualification-analysis-input-v1\n{payload}".encode()).hexdigest()
+
+
+def is_qualification_analysis_run_stale(run: QualificationAnalysisRun) -> bool:
+    """Return true when a run was not produced from the current extracted texts."""
+    if not run.input_fingerprint:
+        return True
+    current = build_qualification_analysis_input(run.notice_version)
+    return run.input_fingerprint != qualification_analysis_input_fingerprint(current)
+
+
+def qualification_analysis_version_fingerprint(version: BidNoticeVersion) -> str:
+    return qualification_analysis_input_fingerprint(
+        build_qualification_analysis_input(version)
+    )
+
+
+def load_latest_current_qualification_analysis_run(
+    db: Session,
+    *,
+    notice_version_id: UUID,
+    include_failed: bool = False,
+) -> QualificationAnalysisRun | None:
+    """Load the newest run whose persisted input still matches current documents."""
+    runs = db.scalars(
+        select(QualificationAnalysisRun)
+        .where(QualificationAnalysisRun.notice_version_id == notice_version_id)
+        .options(
+            selectinload(QualificationAnalysisRun.notice_version).selectinload(
+                BidNoticeVersion.documents
+            ),
+            selectinload(QualificationAnalysisRun.requirements),
+            selectinload(QualificationAnalysisRun.evidence),
+        )
+        .order_by(QualificationAnalysisRun.created_at.desc(), QualificationAnalysisRun.id.desc())
+    ).all()
+    return next(
+        (
+            run
+            for run in runs
+            if (include_failed or run.status != "FAILED")
+            and not is_qualification_analysis_run_stale(run)
+        ),
+        None,
+    )
+
+
+def _persist_result(
+    db: Session,
+    *,
+    version: BidNoticeVersion,
+    result: RequirementAnalysisResult,
+    input_fingerprint: str,
+    commit: bool = True,
+) -> QualificationAnalysisRun:
+    # An unparsed attachment must be explicitly called out. This may contain
+    # additional eligibility restrictions, so it also prevents a definitive
+    # "eligible" verdict while preserving the usable HWP/PDF evidence.
+    from .document_readiness import qualification_documents
+    excluded = qualification_documents(version.documents).skipped
+    diagnostics = [item.model_dump(mode="json") for item in result.diagnostics]
+    coverage = result.coverage.model_dump(mode="json") if result.coverage is not None else None
+    if excluded:
+        diagnostics.append({
+            "code": "UNSUPPORTED_ATTACHMENT_EXCLUDED",
+            "severity": "WARNING",
+            "kind": "PIPELINE",
+            "message": "미지원 첨부파일은 분석에서 제외되었습니다. 해당 파일의 요건은 별도로 확인하세요.",
+            "details": {"file_names": list(excluded), "count": len(excluded)},
+            "evidence_keys": [],
+        })
+        if coverage is not None:
+            coverage.setdefault("gaps", []).append({
+                "kind": "SECTION",
+                "raw": "미분석 첨부파일: " + ", ".join(excluded),
+                "reason": "UNSUPPORTED_ATTACHMENT_EXCLUDED",
+                "blocks_verdict": True,
+            })
+    run = QualificationAnalysisRun(
+        notice_version_id=version.id,
+        contract_version=result.contract_version,
+        analysis_kind=result.analysis_kind,
+        status=result.status,
+        target_chunk_ids=list(result.target_chunk_ids),
+        diagnostics=diagnostics,
+        dropped_requirements=[
+            item.model_dump(mode="json") for item in result.dropped_requirements
+        ],
+        input_fingerprint=input_fingerprint,
+        coverage=coverage,
+    )
+    db.add(run)
+    db.flush()
+
+    for requirement in result.requirements:
+        db.add(
+            QualificationRequirementRecord(
+                analysis_run_id=run.id,
+                requirement_key=requirement.requirement_key,
+                requirement_group_key=requirement.requirement_group_key,
+                group_operator=requirement.group_operator,
+                type=requirement.type,
+                operator=requirement.operator,
+                value_json=requirement.value,
+                unit=requirement.unit,
+                period_months=(
+                    Decimal(str(requirement.period_months))
+                    if requirement.period_months is not None
+                    else None
+                ),
+                scope=dict(requirement.scope),
+                requirement_role=requirement.requirement_role,
+                condition_complexity=requirement.condition_complexity,
+                required=requirement.required,
+                raw=requirement.raw,
+                confidence=(
+                    Decimal(str(requirement.confidence))
+                    if requirement.confidence is not None
+                    else None
+                ),
+                evidence_keys=list(requirement.evidence_keys),
+            )
+        )
+
+    for evidence in result.evidence:
+        db.add(
+            QualificationEvidenceRecord(
+                analysis_run_id=run.id,
+                evidence_key=evidence.evidence_key,
+                source_type=evidence.source_type,
+                document_id=evidence.document_id,
+                notice_version_id=evidence.notice_version_id,
+                case_id=evidence.case_id,
+                chunk_id=evidence.chunk_id,
+                location=evidence.location.model_dump(mode="json"),
+                quote=evidence.quote,
+                source_sha256=evidence.source_sha256,
+                extracted_text_sha256=evidence.extracted_text_sha256,
+            )
+        )
+
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    return load_qualification_analysis_run(db, run.id)
+
+
+def run_qualification_analysis(
+    db: Session,
+    *,
+    notice_id: UUID,
+    version_number: int,
+    structured_extract: StructuredExtractor,
+    commit: bool = True,
+    limits_fetcher: LimitsFetcher | None = None,
+) -> QualificationAnalysisRun:
+    version = _load_notice_version(
+        db, notice_id=notice_id, version_number=version_number
+    )
+    # 나라장터가 구조화해 둔 면허제한·참가가능지역 — 문서 옆의 두 번째 근거다. 저장된 값이 없으면 한 번 받아 둔다.
+    # 조회 함수를 넘기지 않았거나 조회가 실패하면 문서만으로 분석한다.
+    notice_limits = engine_notice_limits(version, ensure_participation_limits(db, version, limits_fetcher))
+    analysis_input = build_qualification_analysis_input(version)
+    input_fingerprint = qualification_analysis_input_fingerprint(analysis_input)
+    # 같은 조항은 같은 답 — 조항 라벨·극성·조항 선택의 첫 답을 DB 에 두고 다시 묻지 않는다. 모델이 temperature 를
+    # 받지 않고 seed 로도 답이 고정되지 않아, 이것 없이는 같은 공고를 다시 분석하면 요건이 달라졌다.
+    # 업종 이름은 기준정보 테이블로 코드화한다.
+    result = analyze_qualification_documents(
+        analysis_input,
+        structured_extract=structured_extract,
+        industry_resolver=DbIndustryNameResolver(db),
+        labeling_memory=DbAnswerMemory(db, "label"),
+        polarity_memory=DbAnswerMemory(db, "polarity"),
+        selection_memory=DbAnswerMemory(db, "selection"),
+        gap_summary_memory=DbAnswerMemory(db, "gap_summary"),
+        # 기억은 모델별로 갈린다 — 모델을 바꾸면 예전 모델의 답을 쓰지 않는다.
+        memory_namespace=getattr(structured_extract, "model", None) or type(structured_extract).__name__,
+        notice_limits=notice_limits,
+    )
+    return _persist_result(
+        db,
+        version=version,
+        result=result,
+        input_fingerprint=input_fingerprint,
+        commit=commit,
+    )
+
+
+def load_qualification_analysis_run(
+    db: Session, run_id: UUID
+) -> QualificationAnalysisRun:
+    run = db.scalar(
+        select(QualificationAnalysisRun)
+        .where(QualificationAnalysisRun.id == run_id)
+        .options(
+            selectinload(QualificationAnalysisRun.notice_version).selectinload(
+                BidNoticeVersion.documents
+            ),
+            selectinload(QualificationAnalysisRun.requirements),
+            selectinload(QualificationAnalysisRun.evidence),
+        )
+    )
+    if run is None:
+        raise QualificationAnalysisError(
+            "ANALYSIS_RUN_NOT_FOUND", "자격요건 분석 실행을 찾을 수 없습니다."
+        )
+    return run
+
+
+def analysis_run_response(run: QualificationAnalysisRun) -> QualificationAnalysisRunRead:
+    version = run.notice_version
+    coverage = AnalysisCoverage.model_validate(run.coverage) if run.coverage else None
+    requirements = [
+        QualificationRequirement(
+            requirement_key=item.requirement_key,
+            requirement_group_key=item.requirement_group_key,
+            group_operator=item.group_operator,
+            notice_version_id=str(version.id),
+            type=item.type,
+            operator=item.operator,
+            value=item.value_json,
+            unit=item.unit,
+            period_months=float(item.period_months) if item.period_months is not None else None,
+            scope=dict(item.scope or {}),
+            requirement_role=item.requirement_role,
+            condition_complexity=item.condition_complexity,
+            required=item.required,
+            raw=item.raw,
+            confidence=float(item.confidence) if item.confidence is not None else None,
+            evidence_keys=list(item.evidence_keys or []),
+        )
+        for item in sorted(run.requirements, key=lambda value: value.requirement_key)
+    ]
+    evidence = [
+        Evidence(
+            evidence_key=item.evidence_key,
+            source_type=item.source_type,
+            document_id=item.document_id,
+            notice_version_id=item.notice_version_id,
+            case_id=item.case_id,
+            chunk_id=item.chunk_id,
+            location=EvidenceLocation(**dict(item.location or {})),
+            quote=item.quote,
+            source_sha256=item.source_sha256,
+            extracted_text_sha256=item.extracted_text_sha256,
+        )
+        for item in sorted(run.evidence, key=lambda value: value.evidence_key)
+    ]
+    return QualificationAnalysisRunRead(
+        id=run.id,
+        notice_id=version.notice_id,
+        notice_version_id=version.id,
+        version_number=version.version_number,
+        contract_version=run.contract_version,
+        analysis_kind=run.analysis_kind,
+        status=run.status,
+        input_fingerprint=run.input_fingerprint,
+        is_stale=is_qualification_analysis_run_stale(run),
+        target_chunk_ids=list(run.target_chunk_ids or []),
+        diagnostics=list(run.diagnostics or []),
+        dropped_requirements=list(run.dropped_requirements or []),
+        coverage=coverage,
+        verdict_complete=coverage.verdict_complete if coverage is not None else None,
+        requirement_tiers={item.requirement_key: requirement_tier(item) for item in requirements},
+        requirements=requirements,
+        evidence=evidence,
+        created_at=run.created_at,
+    )
+
+
+def list_qualification_analysis_runs(
+    db: Session,
+    *,
+    notice_id: UUID,
+    version_number: int,
+) -> list[QualificationAnalysisRunSummary]:
+    version = _load_notice_version(db, notice_id=notice_id, version_number=version_number)
+    runs = db.scalars(
+        select(QualificationAnalysisRun)
+        .where(QualificationAnalysisRun.notice_version_id == version.id)
+        .options(
+            selectinload(QualificationAnalysisRun.notice_version).selectinload(
+                BidNoticeVersion.documents
+            ),
+            selectinload(QualificationAnalysisRun.requirements),
+            selectinload(QualificationAnalysisRun.evidence),
+        )
+        .order_by(QualificationAnalysisRun.created_at.desc())
+    ).all()
+    return [
+        QualificationAnalysisRunSummary(
+            id=run.id,
+            notice_version_id=version.id,
+            version_number=version.version_number,
+            contract_version=run.contract_version,
+            status=run.status,
+            input_fingerprint=run.input_fingerprint,
+            is_stale=is_qualification_analysis_run_stale(run),
+            requirement_count=len(run.requirements),
+            evidence_count=len(run.evidence),
+            created_at=run.created_at,
+        )
+        for run in runs
+    ]

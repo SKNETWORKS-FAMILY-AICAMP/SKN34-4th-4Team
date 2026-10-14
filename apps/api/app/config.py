@@ -1,0 +1,108 @@
+from functools import lru_cache
+from typing import Literal
+from urllib.parse import unquote
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .schemas import BusinessType
+
+
+class Settings(BaseSettings):
+    app_name: str = "Bid Change Validator API"
+    app_version: str = "0.1.0"
+    app_environment: str = "development"
+    database_url: str = (
+        "postgresql://bidjigi:bidjigi_local_password@localhost:5432/bidjigi"
+    )
+    migration_database_url: str | None = None
+    database_pool_mode: Literal["auto", "queue", "transaction"] = "auto"
+    database_pool_size: int = Field(default=2, ge=1, le=50)
+    database_max_overflow: int = Field(default=0, ge=0, le=50)
+    database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    database_pool_recycle_seconds: int = Field(default=900, ge=30, le=86_400)
+    g2b_service_key: str | None = None
+    g2b_base_url: str = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+    g2b_request_timeout_seconds: float = 30.0
+    document_storage_backend: str = "LOCAL"
+    document_storage_path: str = "data/notice-documents"
+    document_download_timeout_seconds: float = 60.0
+    document_max_file_size_bytes: int = 100 * 1024 * 1024
+    document_s3_bucket: str | None = None
+    document_s3_prefix: str = "notice-documents"
+    document_s3_endpoint_url: str | None = None
+    aws_region: str | None = None
+    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    notice_poll_interval_seconds: int = Field(default=300, ge=30)
+    notice_poll_lookback_minutes: int = Field(default=60, ge=1, le=43_200)
+    notice_poll_overlap_minutes: int = Field(default=5, ge=0, le=1_440)
+    notice_poll_page_size: int = Field(default=100, ge=1, le=999)
+    notice_poll_max_pages: int = Field(default=10, ge=1, le=100)
+    notice_poll_business_types: str = "SERVICE,GOODS,CONSTRUCTION,FOREIGN"
+    notice_history_backfill_batch_size: int = Field(default=10, ge=1, le=100)
+    notice_history_backfill_retry_minutes: int = Field(default=15, ge=1, le=1_440)
+    processing_batch_size: int = Field(default=10, ge=1, le=100)
+    processing_poll_interval_seconds: int = Field(default=30, ge=1, le=3600)
+    processing_enable_external: bool = False
+    # 분석할 때 나라장터 면허제한·참가가능지역을 조회해 문서 옆의 두 번째 근거로 쓴다(services/participation_limits.py).
+    participation_limits_lookup_enabled: bool = True
+    qualification_self_service_enabled: bool = False
+    qualification_self_service_daily_limit: int = Field(default=3, ge=1, le=100)
+    # 요금제 한도(membership.py). 켠 환경에서만 계정별 월 한도를 적용한다 — 시연 환경에서 켠다.
+    membership_limits_enabled: bool = False
+    # 시연용 멤버십 코드. 비워 두면 화면에서 가입할 수 없다(결제는 붙어 있지 않다).
+    membership_demo_code: str | None = None
+    auth_bootstrap_admin_username: str = "admin"
+    auth_bootstrap_admin_password: str = "admin"
+    auth_session_ttl_hours: int = Field(default=12, ge=1, le=720)
+    auth_cookie_secure: bool = False
+    auth_required: bool = False
+    # 누구나 아이디·비밀번호로 계정을 만들 수 있게 한다(2026-10-14). 끄면 관리자가 만든 계정만 쓴다.
+    auth_signup_enabled: bool = True
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        return self._as_sqlalchemy_url(self.database_url)
+
+    @property
+    def sqlalchemy_migration_database_url(self) -> str:
+        return self._as_sqlalchemy_url(self.migration_database_url or self.database_url)
+
+    @staticmethod
+    def _as_sqlalchemy_url(value: str) -> str:
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
+
+    @property
+    def decoded_g2b_service_key(self) -> str | None:
+        if self.g2b_service_key is None:
+            return None
+        value = self.g2b_service_key.strip()
+        return unquote(value) if value else None
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def notice_poll_business_type_list(self) -> list[BusinessType]:
+        values: list[BusinessType] = []
+        for raw_value in self.notice_poll_business_types.split(","):
+            value = raw_value.strip().upper()
+            if value:
+                values.append(BusinessType(value))
+        if not values:
+            raise ValueError("NOTICE_POLL_BUSINESS_TYPES must contain at least one value")
+        return list(dict.fromkeys(values))
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

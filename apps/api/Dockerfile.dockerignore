@@ -1,0 +1,11 @@
+*
+!apps/api/requirements.txt
+!apps/api/app
+!apps/api/alembic.ini
+!apps/api/alembic
+!engine
+!eval/golden/qualification-v0.2
+**/__pycache__
+**/*.py[cod]
+engine/tests
+engine/scripts
