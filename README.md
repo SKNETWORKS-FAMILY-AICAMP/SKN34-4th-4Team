@@ -160,7 +160,7 @@
 | --- | --- |
 | **Frontend** | React 19 · TypeScript 5.9 · Vinext(Vite 8) · Tailwind CSS 4 · TanStack Query |
 | **Backend · API** | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Uvicorn |
-| **Django** | Django 5.2 · Gunicorn — 공고문 질문 중계와 요청 기록(Django ORM · Admin, 별도 SQLite). AWS에 함께 배포 |
+| **Django** | Django 5.2 · Gunicorn — 선택적으로 활성화되는 문서 질의응답 중계 및 요청 기록 서비스(Django ORM · Admin, 별도 SQLite). |
 | **AI · RAG** | OpenAI API(구조화 추출 · 답변 생성) · LangChain Core · FAISS · 자체 엔진 `bidengine`(추출 · 근거 확인 · 판정 · 차수 비교) |
 | **Database** | PostgreSQL(AWS RDS) · 마이그레이션 30개 |
 | **문서 처리** | pypdf · olefile · rhwp — PDF · HWP · HWPX |
