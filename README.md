@@ -576,7 +576,7 @@ flowchart LR
 
 ---
 
-## 💬 10. 한 줄 회고
+## 💬 10. 여러 줄 회고
 
 **김재현** · LLM / RAG · Requirement Extraction · Evaluation
 
