@@ -70,8 +70,8 @@
 
 | 산출물 | 파일 |
 | --- | --- |
-| 요구사항 정의서 (기능 48건 · 비기능 30건) | [01_요구사항정의서_비드체크.xlsx](docs/deliverables/01_요구사항정의서_비드체크.xlsx) |
-| 화면설계서 (화면 17장 · 화면 목록 · 이동 흐름) | [02_화면설계서_비드체크.pdf](docs/deliverables/02_화면설계서_비드체크.pdf) |
+| 요구사항 정의서 (기능 35건 · 비기능 11건) | [01_요구사항정의서_비드체크.xlsx](docs/deliverables/01_요구사항정의서_비드체크.xlsx) |
+| 화면설계서 (화면 14개 · 화면 목록 · 이동 흐름) | [02_화면설계서_비드체크.pdf](docs/deliverables/02_화면설계서_비드체크.pdf) |
 | 시스템 구성도 | [03_시스템구성도_비드체크.png](docs/deliverables/03_시스템구성도_비드체크.png) |
 | 테스트 계획 및 결과 보고서 | [04_테스트계획및결과보고서_비드체크.pdf](docs/deliverables/04_테스트계획및결과보고서_비드체크.pdf) |
 | 개발 문서(코드 저장소 README) | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
