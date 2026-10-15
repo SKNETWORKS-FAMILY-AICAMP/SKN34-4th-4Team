@@ -86,7 +86,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 사진 | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="재현" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%A0%9C%EC%B2%9C" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="홍규" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EB%A6%AC%EC%B2%98%EB%93%9C" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="진환" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%9E%AD%EC%8A%A8" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="예린" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EB%A6%B4%EB%A6%AC%EC%95%88" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="수빈" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%82%AC%EB%9D%BC" /> |
 | GitHub | [@kim-4480](https://github.com/kim-4480) | [@4hglee-ops](https://github.com/4hglee-ops) | [@dfs32dfs](https://github.com/dfs32dfs) | [@yerin816](https://github.com/yerin816) | [@subinss838](https://github.com/subinss838) |
-| 주요 담당 | LLM / RAG · Requirement<br>Extraction ·<br>Evaluation | Team Lead · AI Copilot<br>· Product Integration ·<br>Collaboration & Workflow | Backend · API ·<br>전체 시스템 구성 | DataBase ·<br>Data Collection /<br>Management | 기획 · Frontend · UI/UX |
+| 주요 담당 | LLM / RAG · Requirement<br>Extraction ·<br>Evaluation | Team Lead · AI Copilot<br>· Product Integration ·<br>Collaboration & Workflow | Backend · DevOps · AI/ML<br>전체 시스템 구성 | DataBase ·<br>Data Collection /<br>Management | 기획 · Frontend · UI/UX |
 
 ### 협업 방식
 
@@ -160,7 +160,7 @@
 | --- | --- |
 | **Frontend** | React 19 · TypeScript 5.9 · Vinext(Vite 8) · Tailwind CSS 4 · TanStack Query |
 | **Backend · API** | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Uvicorn |
-| **Django** | Django 5.2 · Gunicorn — 공고문 질문 중계와 요청 기록(Django ORM · Admin, 별도 SQLite). AWS에 함께 배포 |
+| **Django** | Django 5.2 · Gunicorn — 선택적으로 활성화되는 문서 질의응답 중계 및 요청 기록 서비스(Django ORM · Admin, 별도 SQLite). |
 | **AI · RAG** | OpenAI API(구조화 추출 · 답변 생성) · LangChain Core · FAISS · 자체 엔진 `bidengine`(추출 · 근거 확인 · 판정 · 차수 비교) |
 | **Database** | PostgreSQL(AWS RDS) · 마이그레이션 30개 |
 | **문서 처리** | pypdf · olefile · rhwp — PDF · HWP · HWPX |
@@ -247,37 +247,81 @@
 
 ## 🗂️ 6. ERD
 
-공고는 차수별로 쌓이고, 분석과 판정은 그 차수에 묶입니다.
+개발 저장소 `develop`의 SQLAlchemy 모델과 Alembic 마이그레이션 기준 **40개 테이블·55개 외래키(FK)** 전체 관계도입니다. 연결선의 이름은 FK 컬럼이며, `o|`는 선택적 참조, `||`는 필수 참조입니다. 컬럼 상세는 생략했습니다. Django 문서 QA의 별도 SQLite DB는 포함하지 않습니다.
 
 ```mermaid
 erDiagram
-    bid_notices ||--o{ bid_notice_versions : "차수"
-    bid_notice_versions ||--o{ notice_documents : "첨부"
-    bid_notice_versions ||--o{ qualification_analysis_runs : "분석"
-    qualification_analysis_runs ||--o{ qualification_requirements : "요건"
-    qualification_analysis_runs ||--o{ qualification_evidence : "근거 문장"
-    companies ||--o{ company_industries : "업종"
-    companies ||--o{ company_performances : "실적"
-    companies ||--o{ company_certifications : "인증"
-    companies ||--o{ app_users : "소속"
-    companies ||--o{ preflight_cases : "검토 건"
-    bid_notices ||--o{ preflight_cases : "대상 공고"
-    preflight_cases ||--o{ qualification_judgment_runs : "판정 실행"
-    qualification_analysis_runs ||--o{ qualification_judgment_runs : "쓴 분석"
-    qualification_judgment_runs ||--o{ qualification_judgments : "요건별 판정"
-    app_users ||--o{ membership_usage : "사용량"
-    app_users ||--o{ auth_sessions : "세션"
+    %% 회사·계정·업종
+    companies o|--o{ app_users : "company_id"
+    app_users ||--o{ auth_sessions : "user_id"
+    companies ||--o{ company_certifications : "company_id"
+    companies ||--o{ company_industries : "company_id"
+    industry_codes ||--o{ company_industries : "industry_code"
+    company_performances ||--o{ company_performance_fields : "performance_id"
+    institution_codes o|--o{ company_performances : "client_institution_code"
+    companies ||--o{ company_performances : "company_id"
+    companies ||--o{ company_qualification_profile_completeness : "company_id"
+    companies ||--o{ company_staff : "company_id"
+    companies ||--o{ company_staff_roles : "company_id"
+    companies ||--o{ company_sw_engineer_grades : "company_id"
+    app_users ||--o{ membership_usage : "user_id"
+    %% 공고·차수·문서
+    bid_notices ||--o{ bid_notice_versions : "notice_id"
+    contract_clause_review_runs ||--o{ contract_clause_findings : "review_run_id"
+    bid_notice_versions ||--o{ contract_clause_review_runs : "notice_version_id"
+    bid_notices ||--o{ notice_change_histories : "notice_id"
+    bid_notice_versions o|--o{ notice_change_histories : "notice_version_id"
+    bid_notice_versions ||--o{ notice_documents : "notice_version_id"
+    notice_documents o|--o{ notice_facts : "document_id"
+    bid_notice_versions ||--o{ notice_facts : "notice_version_id"
+    bid_notices ||--o{ notice_history_backfill_jobs : "notice_id"
+    notice_processing_jobs ||--o{ notice_processing_attempts : "job_id"
+    app_users o|--o{ notice_processing_jobs : "approved_by_id"
+    bid_notice_versions ||--o{ notice_processing_jobs : "notice_version_id"
+    bid_notice_versions ||--o{ notice_recommendation_features : "notice_version_id"
+    bid_notices ||--o{ notice_relations : "notice_id"
+    bid_notices o|--o{ notice_relations : "previous_notice_id"
+    %% 입찰 검토·자격 판정
+    bid_notice_versions o|--o{ preflight_cases : "baseline_version_id"
+    companies o|--o{ preflight_cases : "company_id"
+    bid_notice_versions ||--o{ preflight_cases : "current_version_id"
+    bid_notices ||--o{ preflight_cases : "notice_id"
+    preflight_cases ||--o{ proposal_documents : "case_id"
+    bid_notice_versions ||--o{ qualification_analysis_runs : "notice_version_id"
+    preflight_cases ||--o{ qualification_answers : "preflight_case_id"
+    qualification_judgment_runs o|--o{ qualification_answers : "result_judgment_run_id"
+    qualification_judgment_runs ||--o{ qualification_answers : "source_judgment_run_id"
+    qualification_analysis_runs ||--o{ qualification_evidence : "analysis_run_id"
+    qualification_analysis_runs ||--o{ qualification_judgment_runs : "analysis_run_id"
+    companies ||--o{ qualification_judgment_runs : "company_id"
+    bid_notice_versions ||--o{ qualification_judgment_runs : "notice_version_id"
+    preflight_cases ||--o{ qualification_judgment_runs : "preflight_case_id"
+    qualification_judgment_runs ||--o{ qualification_judgments : "judgment_run_id"
+    qualification_analysis_runs ||--o{ qualification_requirements : "analysis_run_id"
+    qualification_analysis_runs ||--o{ qualification_revalidation_runs : "baseline_analysis_run_id"
+    qualification_analysis_runs ||--o{ qualification_revalidation_runs : "current_analysis_run_id"
+    preflight_cases ||--o{ qualification_revalidation_runs : "preflight_case_id"
+    qualification_judgment_runs ||--o{ qualification_revalidation_runs : "result_judgment_run_id"
+    qualification_judgment_runs ||--o{ qualification_revalidation_runs : "source_judgment_run_id"
+    %% 추천 품질 검수
+    app_users ||--o{ relevance_review_events : "actor_id"
+    relevance_review_labels ||--o{ relevance_review_events : "label_id"
+    app_users o|--o{ relevance_review_labels : "approved_by_id"
+    companies ||--o{ relevance_review_labels : "company_id"
+    bid_notice_versions ||--o{ relevance_review_labels : "notice_version_id"
+    app_users ||--o{ relevance_review_labels : "reviewer_id"
+    %% 독립 테이블 (FK 없음)
+    clause_answer_memory {
+        TEXT kind PK
+        TEXT clause_key PK
+    }
+    notice_collection_runs {
+        UUID id PK
+    }
+    product_codes {
+        TEXT code PK
+    }
 ```
-
-| 표 | 역할 |
-| --- | --- |
-| `bid_notices` · `bid_notice_versions` | 공고와 차수. 변경공고는 새 차수로 쌓입니다. |
-| `notice_documents` | 첨부 문서의 추출문 · 블록 · 해시 |
-| `qualification_analysis_runs` · `_requirements` · `_evidence` | LLM이 구조화한 요건과 근거 문장 |
-| `preflight_cases` | 회사가 공고를 검토하는 단위(기준 차수 · 현재 차수) |
-| `qualification_judgment_runs` · `_judgments` | 판정 실행과 요건별 결과, 당시의 회사 프로필 스냅샷 |
-| `companies` · `company_*` | 회사 프로필 |
-| `app_users` · `auth_sessions` · `membership_usage` | 계정 · 세션 · 요금제 사용량 |
 
 ---
 
@@ -291,7 +335,7 @@ flowchart LR
     subgraph EC2["AWS EC2 · Docker Compose"]
         C --> W[Web · Vinext/React]
         C --> A[API · FastAPI]
-        C -->|/api/v1/django-qa| D[Django<br/>문서 질의 중계 · 요청 기록]
+        C -->|/api/v1/django-qa| D[Django<br/>문서 질의 중계 · 요청 기록<br/>(선택적 활성화)]
         D --> A
         P[notice-poller<br/>공고 수집기]
         K[processing-worker<br/>첨부 추출 · 분석 큐]
@@ -310,7 +354,7 @@ flowchart LR
 ```
 
 - 구조화 데이터는 RDS, 첨부 원본은 비공개 S3에 둡니다. EC2에는 DB 컨테이너가 없습니다.
-- Django는 AWS에 함께 배포됩니다. 배포 워크플로가 Django 이미지를 따로 만들고, EC2에 켜기 표시가 있으면 Caddy가 `/api/v1/django-qa/*`를 Django로 보냅니다. 웹은 동의를 받은 공고문 질문만 이 경로로 보내고, Django는 로그인을 확인해 FastAPI로 넘기며 요청 기록(질문 원문 없이 길이 · 해시 · 소요 시간)을 자체 DB에 남깁니다. 판정 · 회사 정보 · 일반 대화는 그대로 FastAPI가 처리합니다.
+- Django 문서 질의 중계는 선택적으로 활성화하는 별도 서비스입니다. 배포 워크플로가 Django 이미지를 따로 만들지만, EC2에 `django-qa.enabled` 파일이 있을 때만 Django 컨테이너를 실행하고 Caddy가 `/api/v1/django-qa/*`를 Django로 보냅니다. 웹은 동의를 받은 공고문 질문만 이 경로로 보내고, Django는 로그인을 확인해 FastAPI로 넘기며 요청 기록(질문 원문 없이 길이 · 해시 · 소요 시간)을 자체 DB에 남깁니다. 판정 · 회사 정보 · 일반 대화는 그대로 FastAPI가 처리합니다.
 - 비밀 값은 AWS SSM Parameter Store에 두고 배포할 때 EC2에서 읽습니다. GitHub와 이미지에는 장기 키가 없습니다(OIDC 역할 사용).
 - 배포 순서: 이미지 받기 → **스키마 · TLS 검사** → 서비스 교체 → HTTPS 상태 확인. 실패하면 이전 이미지로 되돌립니다.
 
@@ -422,7 +466,7 @@ flowchart LR
 | 참가자격 | `/qualification?caseId=` | 공고의 판정 결과 | 변경 요약, 판정 요약, 핵심 자격 표, 확인할 항목, 공고 요약, 나라장터 원문 |
 | 확인 필요 | `/ask-back` | 판정하지 못한 항목에 답하기 | 질문 카드, 답변 입력, 그 줄만 재판정 |
 | 근거 원문 | `/evidence` | 판정과 공고문 대조 | 문서 본문, 요건별 근거 문장 |
-| 평가 대응 | `/evaluation` | 제안서 평가 항목 확인 | 평가 항목, 제안서 내 위치 |
+| 평가 대응 | `/evaluation` | 공고 요구 항목과 업로드한 제안서의 내용 대조 | 공고 요구 항목·회사 프로필 값, 제안서 업로드·원문 열람, 관련 문구 위치 후보 검색, 항목별 사용자 확인 상태 |
 | 변경 이력 | `/changes` | 차수 사이의 변화 | 차수 카드, 기준 → 현재 비교 표, 판정 영향 |
 | 회사 프로필 | `/company` | 판정에 쓰는 회사 정보 관리 | 사업자등록번호 조회, 업종 · 기본 정보 · 실적 · 인증, 한 번에 저장 |
 | AI 추천 | `/recommendations` | 연관 공고 추천 | 추천 순위, 연관성 점수, 판정 화면으로 가기 |
@@ -430,7 +474,14 @@ flowchart LR
 | 준비 지침서 | `/prep-guide` | 입찰 준비물과 순서 | 판정한 공고 목록, 준비 순서, 일정, 평가 항목별 준비물, 제출 서류 체크리스트 |
 | 운영 관리 | `/admin` | 수집 · 처리 작업 관리 | 시스템 관리자 전용 |
 
-모든 화면에는 떠 있는 둥근 메뉴 바(공고 검색 포함)와 오른쪽 아래의 AI Copilot 단추가 있습니다.
+**평가 대응 화면의 동작**
+
+- **공고 요구 항목 확인:** 참가자격 분석에서 제안서와 대조할 수 있는 요구 항목을 불러와 회사 프로필의 관련 값과 함께 보여 줍니다. 업종·소재지처럼 회사 등록정보로 판정하는 조건은 제안서 본문 대조 대상에서 제외합니다.
+- **제안서 업로드·대조:** 검토 건에 PDF·HWP·HWPX 등 텍스트를 추출할 수 있는 제안서를 올리면, 요구 항목과 관련된 문구의 위치 및 발췌 후보를 찾아 표시합니다. 사용자는 제안서 원문을 열어 보거나 키워드로 직접 검색할 수 있습니다.
+- **담당자 확인:** 후보 위치가 발견됐다고 해당 요건이 충족되는 것은 아닙니다. 사용자가 항목마다 「확인함 · 아직 · 해당없음」을 선택합니다. 선택 상태는 검토 건과 제안서 문서를 기준으로 해당 브라우저에 저장됩니다.
+- **기능 범위:** 관련 문구의 위치를 찾는 기능이며 평가 배점·예상 점수·충족 여부를 자동으로 산정하지 않습니다. **평가 항목과 배점 추출, 제출 서류 및 준비 순서 정리는 별도 「입찰 준비 지침서」 기능**에서 제공합니다.
+
+로그인·회원가입 화면을 제외한 주요 서비스 화면에는 떠 있는 둥근 메뉴 바(공고 검색 포함)와 오른쪽 아래의 AI Copilot 버튼이 있습니다. 로그인·회원가입 화면에는 이 메뉴와 Copilot 버튼을 표시하지 않습니다.
 
 ---
 
@@ -562,7 +613,7 @@ flowchart LR
 
 - 실적 · 인증처럼 이름으로 적힌 조건은 자동으로 확정하지 않습니다. "확인할 항목"으로 남기고 담당자가 봅니다.
 - 요금제의 결제는 붙어 있지 않습니다. 멤버십 코드로 가입하는 시연용 흐름입니다.
-- AI 추천은 학습 모델 없이 낱말 겹침 방식으로 동작합니다.
+- AI 추천은 학습 모델을 운영에 적용하지 않았으며, BM25 기반 검색으로 관련 공고를 추천합니다.
 - 조달청 조회는 나라장터에 입찰참가자격을 등록한 업체만 됩니다.
 - 준비 지침서는 서버에 저장하지 않아 다른 기기에서는 다시 만들어야 합니다. 제안요청서가 첨부되지 않은 공고는 평가 항목 없이 일정 · 제출 서류만 나옵니다.
 - 회원가입에 요청 횟수 제한과 이메일 인증이 없습니다. 공개 서비스로 열 때는 필요합니다.
@@ -586,9 +637,9 @@ flowchart LR
 
 > AI Copilot을 붙이면서 가장 곤란했던 건 같은 공고를 두고 판정 화면은 "확인 필요"라고 하는데 Copilot은 "참여 가능"이라고 답하는 상황이었다. 모델이 따로 판단하지 않고 저장된 판정 결과를 근거로만 말하게 바꾸고 나서야 두 화면이 같은 말을 하게 됐다. 다른 계정의 대화가 그대로 보이는 문제도 있었는데, 원인은 브라우저 저장 칸 하나를 모든 계정이 같이 쓰고 있던 것이었다. 기능 하나하나보다 화면, API, 엔진이 같은 기준을 보고 있는지 확인하는 일에 시간이 더 들었다. 무료 계정의 질문 한도를 공고마다 셀지 한 달 단위로 셀지처럼 정책을 정하는 문제도 결국 팀이 같은 그림을 갖고 있어야 풀렸다. 다음에는 기능을 나누기 전에 기준이 되는 데이터가 무엇인지부터 먼저 맞추고 시작하고 싶다.
 
-**전진환** · Backend · API · 전체 시스템 구성
+**전진환** · Backend · DevOps · AI/ML · 전체 시스템 구성
 
-> Backend/API와 AWS 배포를 맡아 병합하면 CI를 거쳐 EC2까지 자동으로 올라가는 흐름을 만들었다. 막상 돌려 보니 코드는 새 DB 구조를 요구하는데 RDS에는 아직 마이그레이션이 적용되지 않아 배포가 스키마 검사에서 계속 멈췄다. 처음엔 배포가 고장 난 줄 알았지만, 잘못된 버전이 올라가지 않게 이전 이미지로 되돌려 준 것이었다. 병합했는데 반영이 안 된 날은 원인이 코드가 아니라 CI가 테스트용 DB 이미지를 받다가 다운로드 한도에 걸린 것이었고, SSM 명령은 100초만 기다리고 끝나 실제 배포 결과를 놓치기도 했다. Django 문서 질의 중계를 붙일 때는 켜기 표시가 있을 때만 띄우고 되돌릴 땐 같이 꺼지게 하는 데 신경을 많이 썼다. 배포는 성공하는 경로보다 실패했을 때 어디로 돌아가는지를 먼저 설계해야 한다는 걸 이번에 확실히 배웠다.
+> Backend/API와 AWS 배포를 맡아 CI 통과 후 EC2까지 자동으로 배포되는 환경을 구축하고, 공고 수집과 문서 추출, AI 추천 기능까지 여러 영역을 연결했다. 처음에는 기능을 구현하고 병합하면 어느 정도 끝날 거라 생각했지만, 실제로는 코드와 RDS 스키마가 맞지 않아 배포가 중단되거나 CI 문제로 반영이 지연되는 일이 반복됐다. 특히 처음에는 단순한 배포 오류라고 생각했던 스키마 검사와 롤백이 오히려 잘못된 버전이 올라가는 것을 막아 주는 장치였다는 점이 인상적이었다. Backend에서는 공고 첨부파일의 재처리 과정에서 원문과 추출 결과의 정합성을 개선하고, 변경공고 분석에서도 이전 판정을 잘못 재사용하지 않도록 수정했다. AI/ML 분야에서도 LightGBM과 Encoder 모델, BM25와 E5 검색 방식 등을 비교하며 추천 성능을 개선할 방법을 찾아봤다. 다만 실제 기업과 공고를 기반으로 한 검증 데이터가 부족해 실험 결과만으로 성능을 확정하기는 어려웠고, 이 과정에서 모델을 구현하는 것과 실제 품질을 검증하는 것은 별개의 문제라는 점을 느꼈다. Django 문서 질의 기능을 추가할 때도 기존 서비스에 영향을 주지 않도록 선택적으로 활성화하고, 배포를 되돌리면 함께 꺼지도록 구성했다. 작업 범위가 넓었던 만큼 개별 기능을 충분히 다듬지 못한 부분은 아쉽지만, 이번 프로젝트를 통해 기능 구현뿐 아니라 데이터 정합성, 검증, 장애 발생 시 복구까지 고려해야 한다는 점을 배울 수 있었다.
 
 **정예린** · Database · Data Collection / Management
 
