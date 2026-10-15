@@ -86,7 +86,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 사진 | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="재현" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%A0%9C%EC%B2%9C" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="홍규" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EB%A6%AC%EC%B2%98%EB%93%9C" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="진환" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%9E%AD%EC%8A%A8" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="예린" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EB%A6%B4%EB%A6%AC%EC%95%88" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="수빈" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%82%AC%EB%9D%BC" /> |
 | GitHub | [@kim-4480](https://github.com/kim-4480) | [@4hglee-ops](https://github.com/4hglee-ops) | [@dfs32dfs](https://github.com/dfs32dfs) | [@yerin816](https://github.com/yerin816) | [@subinss838](https://github.com/subinss838) |
-| 주요 담당 | LLM / RAG · Requirement<br>Extraction ·<br>Evaluation | Team Lead · AI Copilot<br>· Product Integration ·<br>Collaboration & Workflow | Backend · DevOps · AI/ML<br>시스템 통합 | DataBase ·<br>Data Collection /<br>Management | 기획 · Frontend · UI/UX |
+| 주요 담당 | LLM / RAG · Requirement<br>Extraction ·<br>Evaluation | Team Lead · AI Copilot<br>· Product Integration ·<br>Collaboration & Workflow | Backend · DevOps · AI/ML<br>전체 시스템 구성 | DataBase ·<br>Data Collection /<br>Management | 기획 · Frontend · UI/UX |
 
 ### 협업 방식
 
@@ -637,7 +637,7 @@ flowchart LR
 
 > AI Copilot을 붙이면서 가장 곤란했던 건 같은 공고를 두고 판정 화면은 "확인 필요"라고 하는데 Copilot은 "참여 가능"이라고 답하는 상황이었다. 모델이 따로 판단하지 않고 저장된 판정 결과를 근거로만 말하게 바꾸고 나서야 두 화면이 같은 말을 하게 됐다. 다른 계정의 대화가 그대로 보이는 문제도 있었는데, 원인은 브라우저 저장 칸 하나를 모든 계정이 같이 쓰고 있던 것이었다. 기능 하나하나보다 화면, API, 엔진이 같은 기준을 보고 있는지 확인하는 일에 시간이 더 들었다. 무료 계정의 질문 한도를 공고마다 셀지 한 달 단위로 셀지처럼 정책을 정하는 문제도 결국 팀이 같은 그림을 갖고 있어야 풀렸다. 다음에는 기능을 나누기 전에 기준이 되는 데이터가 무엇인지부터 먼저 맞추고 시작하고 싶다.
 
-**전진환** · Backend · DevOps · AI/ML · 시스템 통합
+**전진환** · Backend · DevOps · AI/ML · 전체 시스템 구성
 
 > Backend/API와 AWS 배포를 맡아 CI 통과 후 EC2까지 자동으로 배포되는 환경을 구축하고, 공고 수집과 문서 추출, AI 추천 기능까지 여러 영역을 연결했다. 처음에는 기능을 구현하고 병합하면 어느 정도 끝날 거라 생각했지만, 실제로는 코드와 RDS 스키마가 맞지 않아 배포가 중단되거나 CI 문제로 반영이 지연되는 일이 반복됐다. 특히 처음에는 단순한 배포 오류라고 생각했던 스키마 검사와 롤백이 오히려 잘못된 버전이 올라가는 것을 막아 주는 장치였다는 점이 인상적이었다. Backend에서는 공고 첨부파일의 재처리 과정에서 원문과 추출 결과의 정합성을 개선하고, 변경공고 분석에서도 이전 판정을 잘못 재사용하지 않도록 수정했다. AI/ML 분야에서도 LightGBM과 Encoder 모델, BM25와 E5 검색 방식 등을 비교하며 추천 성능을 개선할 방법을 찾아봤다. 다만 실제 기업과 공고를 기반으로 한 검증 데이터가 부족해 실험 결과만으로 성능을 확정하기는 어려웠고, 이 과정에서 모델을 구현하는 것과 실제 품질을 검증하는 것은 별개의 문제라는 점을 느꼈다. Django 문서 질의 기능을 추가할 때도 기존 서비스에 영향을 주지 않도록 선택적으로 활성화하고, 배포를 되돌리면 함께 꺼지도록 구성했다. 작업 범위가 넓었던 만큼 개별 기능을 충분히 다듬지 못한 부분은 아쉽지만, 이번 프로젝트를 통해 기능 구현뿐 아니라 데이터 정합성, 검증, 장애 발생 시 복구까지 고려해야 한다는 점을 배울 수 있었다.
 
