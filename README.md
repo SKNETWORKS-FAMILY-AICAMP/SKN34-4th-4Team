@@ -86,7 +86,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 사진 | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="재현" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%A0%9C%EC%B2%9C" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="홍규" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EB%A6%AC%EC%B2%98%EB%93%9C" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="진환" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%9E%AD%EC%8A%A8" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="예린" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EB%A6%B4%EB%A6%AC%EC%95%88" /> | <img width="140" height="140" style="object-fit:cover;border-radius:12px;background:#f6f7f9;" alt="수빈" src="https://soopool.art/img/infoacpc/loadingscreen_png/%EC%82%AC%EB%9D%BC" /> |
 | GitHub | [@kim-4480](https://github.com/kim-4480) | [@4hglee-ops](https://github.com/4hglee-ops) | [@dfs32dfs](https://github.com/dfs32dfs) | [@yerin816](https://github.com/yerin816) | [@subinss838](https://github.com/subinss838) |
-| 주요 담당 | LLM / RAG · Requirement<br>Extraction ·<br>Evaluation | Team Lead · AI Copilot<br>· Product Integration ·<br>Collaboration & Workflow | Backend · API · AWS/CI/CD<br>전체 시스템 구성·통합<br>공고 수집 · HWP/HWPX 문서 추출<br>AI Core · ML/검색 검증 | DataBase ·<br>Data Collection /<br>Management | 기획 · Frontend · UI/UX |
+| 주요 담당 | LLM / RAG · Requirement<br>Extraction ·<br>Evaluation | Team Lead · AI Copilot<br>· Product Integration ·<br>Collaboration & Workflow | Backend · DevOps · AI/ML<br>시스템 통합 | DataBase ·<br>Data Collection /<br>Management | 기획 · Frontend · UI/UX |
 
 ### 협업 방식
 
@@ -637,9 +637,9 @@ flowchart LR
 
 > AI Copilot을 붙이면서 가장 곤란했던 건 같은 공고를 두고 판정 화면은 "확인 필요"라고 하는데 Copilot은 "참여 가능"이라고 답하는 상황이었다. 모델이 따로 판단하지 않고 저장된 판정 결과를 근거로만 말하게 바꾸고 나서야 두 화면이 같은 말을 하게 됐다. 다른 계정의 대화가 그대로 보이는 문제도 있었는데, 원인은 브라우저 저장 칸 하나를 모든 계정이 같이 쓰고 있던 것이었다. 기능 하나하나보다 화면, API, 엔진이 같은 기준을 보고 있는지 확인하는 일에 시간이 더 들었다. 무료 계정의 질문 한도를 공고마다 셀지 한 달 단위로 셀지처럼 정책을 정하는 문제도 결국 팀이 같은 그림을 갖고 있어야 풀렸다. 다음에는 기능을 나누기 전에 기준이 되는 데이터가 무엇인지부터 먼저 맞추고 시작하고 싶다.
 
-**전진환** · Backend · API · 전체 시스템 구성
+**전진환** · Backend · DevOps · AI/ML · 시스템 통합
 
-> Backend/API와 AWS 배포를 맡아 병합하면 CI를 거쳐 EC2까지 자동으로 올라가는 흐름을 만들었다. 막상 돌려 보니 코드는 새 DB 구조를 요구하는데 RDS에는 아직 마이그레이션이 적용되지 않아 배포가 스키마 검사에서 계속 멈췄다. 처음엔 배포가 고장 난 줄 알았지만, 잘못된 버전이 올라가지 않게 이전 이미지로 되돌려 준 것이었다. 병합했는데 반영이 안 된 날은 원인이 코드가 아니라 CI가 테스트용 DB 이미지를 받다가 다운로드 한도에 걸린 것이었고, SSM 명령은 100초만 기다리고 끝나 실제 배포 결과를 놓치기도 했다. Django 문서 질의 중계를 붙일 때는 켜기 표시가 있을 때만 띄우고 되돌릴 땐 같이 꺼지게 하는 데 신경을 많이 썼다. 배포는 성공하는 경로보다 실패했을 때 어디로 돌아가는지를 먼저 설계해야 한다는 걸 이번에 확실히 배웠다.
+> 전반적으로 실제 공고를 대상으로 판정 오류를 줄이고, Backend/API부터 AWS 배포까지 실제로 동작하는 결과물을 만들 수 있었다는 점이 만족스럽다. 처음에는 llm으로 자격요건 추출과 판정까지 상당 부분 처리할 수 있을 거라 생각했지만, 실제 공고를 분석해 보니 없는 요건을 만들어내거나 자격을 갖춘 회사를 미달로 판단하는 문제가 생각보다 많았다. 이를 개선하면서 업종코드와 포함 면허, 기업 규모, 지역 제한, 복합 조건 등은 코드로 판정하는 비중을 늘렸고, 나라장터의 면허제한 정보도 함께 활용하도록 수정했다. 확실하지 않은 조건은 무리하게 판단하지 않고 확인 필요로 남기도록 했으며, 골든셋과 새로운 공고를 대상으로 회귀 검증을 반복했다. 특히 92건의 공고를 대상으로 한 회귀 측정에서 잘못된 충족·미충족 판정을 0건으로 유지할 수 있었다는 점이 의미 있었던 것 같다. 배포 과정에서도 CI를 거쳐 AWS에 자동 반영되는 환경을 다루면서 RDS 마이그레이션 불일치로 배포가 중단되는 문제를 겪었다. 처음에는 단순한 오류라고 생각했지만, 스키마 검사가 오히려 잘못된 버전이 올라가는 것을 막아 주는 장치였다는 점이 인상적이었다. Django 문서 질의 기능도 기존 서비스에 영향을 주지 않도록 선택적으로 활성화하고 되돌릴 수 있게 구성했다. 3차시 프로젝트에서 고도화 방향으로 생각해 두었던 사업계획서 초안 기능은 실제 회사 정보를 지어낼 위험이 있어 입찰 준비 지침서로 변경했고, 이 역시 결과적으로 맞는 판단이었다고 생각한다. 다만 판정 정확도 개선과 기능 구현, 배포 안정화에 대부분의 시간을 사용하면서 사용자 편의성과 전체적인 기획을 충분히 다듬지 못한 점은 아쉽다. 처음 구상했던 방향과는 다소 차이가 있었지만, 그 과정에서 llm의 한계와 실제 서비스를 운영할 때 고려해야 할 부분에 대한 이해도가 늘어났다고 생각한다. 부족한 일정 속에서도 미완이 아닌 결과물을 낼 수 있었다는 점 역시 만족스럽다.
 
 **정예린** · Database · Data Collection / Management
 
