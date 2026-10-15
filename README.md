@@ -247,37 +247,81 @@
 
 ## 🗂️ 6. ERD
 
-공고는 차수별로 쌓이고, 분석과 판정은 그 차수에 묶입니다.
+개발 저장소 `develop`의 SQLAlchemy 모델과 Alembic 마이그레이션 기준 **40개 테이블·55개 외래키(FK)** 전체 관계도입니다. 연결선의 이름은 FK 컬럼이며, `o|`는 선택적 참조, `||`는 필수 참조입니다. 컬럼 상세는 생략했습니다. Django 문서 QA의 별도 SQLite DB는 포함하지 않습니다.
 
 ```mermaid
 erDiagram
-    bid_notices ||--o{ bid_notice_versions : "차수"
-    bid_notice_versions ||--o{ notice_documents : "첨부"
-    bid_notice_versions ||--o{ qualification_analysis_runs : "분석"
-    qualification_analysis_runs ||--o{ qualification_requirements : "요건"
-    qualification_analysis_runs ||--o{ qualification_evidence : "근거 문장"
-    companies ||--o{ company_industries : "업종"
-    companies ||--o{ company_performances : "실적"
-    companies ||--o{ company_certifications : "인증"
-    companies ||--o{ app_users : "소속"
-    companies ||--o{ preflight_cases : "검토 건"
-    bid_notices ||--o{ preflight_cases : "대상 공고"
-    preflight_cases ||--o{ qualification_judgment_runs : "판정 실행"
-    qualification_analysis_runs ||--o{ qualification_judgment_runs : "쓴 분석"
-    qualification_judgment_runs ||--o{ qualification_judgments : "요건별 판정"
-    app_users ||--o{ membership_usage : "사용량"
-    app_users ||--o{ auth_sessions : "세션"
+    %% 회사·계정·업종
+    companies o|--o{ app_users : "company_id"
+    app_users ||--o{ auth_sessions : "user_id"
+    companies ||--o{ company_certifications : "company_id"
+    companies ||--o{ company_industries : "company_id"
+    industry_codes ||--o{ company_industries : "industry_code"
+    company_performances ||--o{ company_performance_fields : "performance_id"
+    institution_codes o|--o{ company_performances : "client_institution_code"
+    companies ||--o{ company_performances : "company_id"
+    companies ||--o{ company_qualification_profile_completeness : "company_id"
+    companies ||--o{ company_staff : "company_id"
+    companies ||--o{ company_staff_roles : "company_id"
+    companies ||--o{ company_sw_engineer_grades : "company_id"
+    app_users ||--o{ membership_usage : "user_id"
+    %% 공고·차수·문서
+    bid_notices ||--o{ bid_notice_versions : "notice_id"
+    contract_clause_review_runs ||--o{ contract_clause_findings : "review_run_id"
+    bid_notice_versions ||--o{ contract_clause_review_runs : "notice_version_id"
+    bid_notices ||--o{ notice_change_histories : "notice_id"
+    bid_notice_versions o|--o{ notice_change_histories : "notice_version_id"
+    bid_notice_versions ||--o{ notice_documents : "notice_version_id"
+    notice_documents o|--o{ notice_facts : "document_id"
+    bid_notice_versions ||--o{ notice_facts : "notice_version_id"
+    bid_notices ||--o{ notice_history_backfill_jobs : "notice_id"
+    notice_processing_jobs ||--o{ notice_processing_attempts : "job_id"
+    app_users o|--o{ notice_processing_jobs : "approved_by_id"
+    bid_notice_versions ||--o{ notice_processing_jobs : "notice_version_id"
+    bid_notice_versions ||--o{ notice_recommendation_features : "notice_version_id"
+    bid_notices ||--o{ notice_relations : "notice_id"
+    bid_notices o|--o{ notice_relations : "previous_notice_id"
+    %% 입찰 검토·자격 판정
+    bid_notice_versions o|--o{ preflight_cases : "baseline_version_id"
+    companies o|--o{ preflight_cases : "company_id"
+    bid_notice_versions ||--o{ preflight_cases : "current_version_id"
+    bid_notices ||--o{ preflight_cases : "notice_id"
+    preflight_cases ||--o{ proposal_documents : "case_id"
+    bid_notice_versions ||--o{ qualification_analysis_runs : "notice_version_id"
+    preflight_cases ||--o{ qualification_answers : "preflight_case_id"
+    qualification_judgment_runs o|--o{ qualification_answers : "result_judgment_run_id"
+    qualification_judgment_runs ||--o{ qualification_answers : "source_judgment_run_id"
+    qualification_analysis_runs ||--o{ qualification_evidence : "analysis_run_id"
+    qualification_analysis_runs ||--o{ qualification_judgment_runs : "analysis_run_id"
+    companies ||--o{ qualification_judgment_runs : "company_id"
+    bid_notice_versions ||--o{ qualification_judgment_runs : "notice_version_id"
+    preflight_cases ||--o{ qualification_judgment_runs : "preflight_case_id"
+    qualification_judgment_runs ||--o{ qualification_judgments : "judgment_run_id"
+    qualification_analysis_runs ||--o{ qualification_requirements : "analysis_run_id"
+    qualification_analysis_runs ||--o{ qualification_revalidation_runs : "baseline_analysis_run_id"
+    qualification_analysis_runs ||--o{ qualification_revalidation_runs : "current_analysis_run_id"
+    preflight_cases ||--o{ qualification_revalidation_runs : "preflight_case_id"
+    qualification_judgment_runs ||--o{ qualification_revalidation_runs : "result_judgment_run_id"
+    qualification_judgment_runs ||--o{ qualification_revalidation_runs : "source_judgment_run_id"
+    %% 추천 품질 검수
+    app_users ||--o{ relevance_review_events : "actor_id"
+    relevance_review_labels ||--o{ relevance_review_events : "label_id"
+    app_users o|--o{ relevance_review_labels : "approved_by_id"
+    companies ||--o{ relevance_review_labels : "company_id"
+    bid_notice_versions ||--o{ relevance_review_labels : "notice_version_id"
+    app_users ||--o{ relevance_review_labels : "reviewer_id"
+    %% 독립 테이블 (FK 없음)
+    clause_answer_memory {
+        TEXT kind PK
+        TEXT clause_key PK
+    }
+    notice_collection_runs {
+        UUID id PK
+    }
+    product_codes {
+        TEXT code PK
+    }
 ```
-
-| 표 | 역할 |
-| --- | --- |
-| `bid_notices` · `bid_notice_versions` | 공고와 차수. 변경공고는 새 차수로 쌓입니다. |
-| `notice_documents` | 첨부 문서의 추출문 · 블록 · 해시 |
-| `qualification_analysis_runs` · `_requirements` · `_evidence` | LLM이 구조화한 요건과 근거 문장 |
-| `preflight_cases` | 회사가 공고를 검토하는 단위(기준 차수 · 현재 차수) |
-| `qualification_judgment_runs` · `_judgments` | 판정 실행과 요건별 결과, 당시의 회사 프로필 스냅샷 |
-| `companies` · `company_*` | 회사 프로필 |
-| `app_users` · `auth_sessions` · `membership_usage` | 계정 · 세션 · 요금제 사용량 |
 
 ---
 
